@@ -453,9 +453,9 @@ function renderInsights() {
 }
 
 // ============================================================
-// PDF IMPORT — PARSING
+// CSV IMPORT — PARSING
 // ============================================================
-const PDF_CAT_KEYWORDS = {
+const CSV_CAT_KEYWORDS = {
   food:      ['justeat','ubereats','uber eat','deliveroo','mcdonald','mcdo ','kfc ','subway ','popeyes','burger','pizza ','sushi','restaurant','resto ','boulang','patisseri','kebab','traiteur','cafeteria','cantine','sandwi','takeaway','brasserie','pizzeria','eat.ch','snack'],
   fuel:      ['tamoil','celsa','eni ','shell ','bp ','migrol','agrola','socar','repsol','station ','benzin','carburant'],
   night:     ['nightclub','club ','pub ','bar ','disco ','lounge','concert','festival','ticketcorner','cinema ','kino ','theatre','spectacle'],
@@ -464,141 +464,164 @@ const PDF_CAT_KEYWORDS = {
   transport: ['tpg ','bls ','vbz ','postauto','postbus','unireso','parking','parkhaus','uber ','taxi ','sixt ','europcar','apcoa'],
 };
 
-function pdfGetCategory(desc) {
+function csvGetCategory(desc) {
   const d = desc.toLowerCase();
-  for (const [cat, kws] of Object.entries(PDF_CAT_KEYWORDS)) {
+  for (const [cat, kws] of Object.entries(CSV_CAT_KEYWORDS)) {
     if (kws.some(kw => d.includes(kw))) return cat;
   }
   return 'other';
 }
 
-function pdfExtractAmounts(text) {
-  const results = [];
-  const re = /(?<!\d)(\d{1,3}(?:['\u202f ]\d{3})*[.,]\d{2})(?!\d)/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const val = parseFloat(m[1].replace(/['\u202f ]/g, '').replace(',', '.'));
-    if (val >= 0.5 && val < 1000000) results.push(val);
+function csvSplitLine(line, sep) {
+  const cells = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === sep && !inQ) { cells.push(cur.trim()); cur = ''; }
+    else { cur += c; }
   }
-  return results;
+  cells.push(cur.trim());
+  return cells;
 }
 
-function handlePdfDrop(e) {
-  e.preventDefault();
-  document.getElementById('pdfZone').classList.remove('drag');
-  const file = e.dataTransfer.files[0];
-  if (file) handlePdfFile(file);
+function cleanCell(val) {
+  return val.replace(/^"+|"+$/g, '').trim();
 }
 
-async function handlePdfFile(file) {
-  if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
-    toast('Sélectionne un fichier PDF.', 'error');
-    return;
-  }
-  const el = document.getElementById('pdfResult');
-  el.innerHTML = '<div class="form-card pdf-parsing">⏳ Analyse du relevé en cours...</div>';
-
-  if (!window.pdfjsLib) {
-    el.innerHTML = '<div class="form-card"><div class="alert"><strong>PDF.js non chargé.</strong> Vérifie ta connexion internet et réessaie.</div></div>';
-    return;
-  }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-  try {
-    const result = await parseBankPDF(file);
-    displayPdfResult(result);
-  } catch(err) {
-    console.error(err);
-    el.innerHTML = '<div class="form-card"><div class="alert"><strong>Erreur de lecture :</strong> Ce PDF n\'a pas pu être analysé. Il est peut-être scanné (image sans texte). Saisis les données manuellement.</div></div>';
-  }
-  document.getElementById('pdfInput').value = '';
+function parseAmountCell(str) {
+  if (!str) return NaN;
+  // Remove Swiss thousand separators (apostrophe or space), normalise decimal
+  const cleaned = str.replace(/['\u202f\s]/g, '').replace(',', '.');
+  const v = parseFloat(cleaned);
+  return isNaN(v) ? NaN : Math.abs(v);
 }
 
-async function parseBankPDF(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const allLines = [];
-
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-
-    // Group text items by Y position (2px tolerance) to reconstruct lines
-    const byY = {};
-    content.items.forEach(item => {
-      if (!item.str.trim()) return;
-      const y = Math.round(item.transform[5] / 2) * 2;
-      if (!byY[y]) byY[y] = [];
-      byY[y].push({ text: item.str, x: item.transform[4] });
-    });
-
-    Object.keys(byY)
-      .sort((a, b) => +b - +a) // top to bottom
-      .forEach(y => {
-        const line = byY[y].sort((a, b) => a.x - b.x).map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
-        if (line.length > 1) allLines.push(line);
-      });
+function findColIdx(headers, candidates) {
+  for (const c of candidates) {
+    const idx = headers.findIndex(h => h.toLowerCase().includes(c.toLowerCase()));
+    if (idx !== -1) return idx;
   }
-
-  return parseStatementLines(allLines);
+  return -1;
 }
 
-function parseStatementLines(lines) {
-  const dateRe = /\b(\d{2})[./](\d{2})[./](\d{4})\b/;
-  let credits = 0, debits = 0;
+function parseCSVStatement(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+
+  // Detect separator
+  const sample = lines.slice(0, 5).join('\n');
+  const sep = [';', ',', '\t'].reduce((best, s) =>
+    (sample.split(s).length > sample.split(best).length ? s : best), ';');
+
+  const rows = lines.map(l => csvSplitLine(l, sep).map(cleanCell));
+
+  // Find header row: first row containing date + amount keywords
+  const DATE_HEADS   = ['date','datum','dat'];
+  const AMT_HEADS    = ['montant','amount','betrag','debit','débit','credit','crédit','gutschrift','belastung'];
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const r = rows[i].map(c => c.toLowerCase());
+    const hasDate = DATE_HEADS.some(k => r.some(c => c.includes(k)));
+    const hasAmt  = AMT_HEADS.some(k => r.some(c => c.includes(k)));
+    if (hasDate && hasAmt) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return null;
+
+  const headers  = rows[headerIdx];
+  const colDate  = findColIdx(headers, ['date','datum','dat']);
+  const colDesc  = findColIdx(headers, ['libellé','libelle','description','texte','text','buchungstext','bezeichnung','remarque']);
+  const colAmt   = findColIdx(headers, ['montant','amount','betrag']);
+  const colDebit = findColIdx(headers, ['débit','debit','belastung','ausgabe']);
+  const colCredit= findColIdx(headers, ['crédit','credit','gutschrift','einnahme']);
+
+  if (colDate === -1 || (colAmt === -1 && colDebit === -1 && colCredit === -1)) return null;
+
+  let totalCredits = 0, totalDebits = 0;
   const cats = { food: 0, fuel: 0, night: 0, travel: 0, shop: 0, transport: 0, other: 0 };
   let detectedMonth = null, detectedYear = null;
   let txCount = 0;
 
-  // Pass 1 — look for explicit totals (most reliable)
-  let foundTotalDebits = 0, foundTotalCredits = 0;
-  lines.forEach(line => {
-    const amounts = pdfExtractAmounts(line);
-    if (!amounts.length) return;
-    const amt = amounts[amounts.length - 1];
-    if (/(total.{0,15}d[eé]bit|sortie.{0,5}total|gesamtbelast)/i.test(line))  foundTotalDebits  = amt;
-    if (/(total.{0,15}cr[eé]dit|entr[eé]e.{0,5}total|gesamtgutsschr)/i.test(line)) foundTotalCredits = amt;
-  });
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length <= colDate) continue;
 
-  // Pass 2 — parse individual transaction lines for categories
-  lines.forEach(line => {
-    const dateMatch = line.match(dateRe);
-    if (!dateMatch) return;
-    const day = +dateMatch[1], month = +dateMatch[2] - 1, year = +dateMatch[3];
-    if (day < 1 || day > 31 || month < 0 || month > 11 || year < 2020 || year > 2040) return;
-
+    // Parse date — DD.MM.YYYY or YYYY-MM-DD
+    const rawDate = row[colDate] || '';
+    let month = null, year = null;
+    const m1 = rawDate.match(/^(\d{2})[./](\d{2})[./](\d{4})$/);
+    const m2 = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m1) { month = +m1[2] - 1; year = +m1[3]; }
+    else if (m2) { month = +m2[2] - 1; year = +m2[1]; }
+    if (month === null || month < 0 || month > 11) continue;
+    if (year < 2010 || year > 2040) continue;
     if (detectedMonth === null) { detectedMonth = month; detectedYear = year; }
 
-    const amounts = pdfExtractAmounts(line);
-    if (!amounts.length) return;
-    // In most statements the last amount is the balance — use second-to-last if available
-    const amount = amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[amounts.length - 1];
-    if (amount < 0.01) return;
+    const desc = colDesc !== -1 ? (row[colDesc] || '') : '';
 
-    const isCredit = /salaire|salary|virement.{0,10}entrant|bonification|avoir|gutschrift|intérêt/i.test(line);
-    if (isCredit) {
-      credits += amount;
+    if (colAmt !== -1) {
+      // Single amount column — sign or keyword determines direction
+      const rawAmt = row[colAmt] || '';
+      const isNeg  = rawAmt.trim().startsWith('-');
+      const val    = parseAmountCell(rawAmt);
+      if (isNaN(val) || val < 0.01) continue;
+      if (isNeg || /débit|debit|belastung/i.test(headers[colAmt])) {
+        totalDebits += val;
+        cats[csvGetCategory(desc)] += val;
+      } else {
+        totalCredits += val;
+      }
     } else {
-      debits += amount;
-      cats[pdfGetCategory(line)] += amount;
+      // Separate debit / credit columns
+      const dVal = colDebit  !== -1 ? parseAmountCell(row[colDebit]  || '') : NaN;
+      const cVal = colCredit !== -1 ? parseAmountCell(row[colCredit] || '') : NaN;
+      if (!isNaN(dVal) && dVal > 0.01) { totalDebits  += dVal; cats[csvGetCategory(desc)] += dVal; }
+      if (!isNaN(cVal) && cVal > 0.01)   totalCredits += cVal;
+      if (isNaN(dVal) && isNaN(cVal)) continue;
     }
     txCount++;
-  });
+  }
 
-  // Prefer found totals when they diverge significantly from parsed sums
-  if (foundTotalDebits  > 0 && (debits  === 0 || Math.abs(foundTotalDebits  - debits)  / foundTotalDebits  > 0.1)) debits  = foundTotalDebits;
-  if (foundTotalCredits > 0 && (credits === 0 || Math.abs(foundTotalCredits - credits) / foundTotalCredits > 0.1)) credits = foundTotalCredits;
-
-  // If totals were found but no transactions parsed, dump debits into 'other'
-  if (txCount === 0 && debits > 0) cats.other = debits;
-
-  return { month: detectedMonth, year: detectedYear, credits, debits, cats, txCount };
+  const rawText = rows.map(r => r.join(' | ')).join('\n');
+  return { month: detectedMonth, year: detectedYear, credits: totalCredits, debits: totalDebits, cats, txCount, rawText };
 }
 
-function displayPdfResult(result) {
-  const el = document.getElementById('pdfResult');
-  if (result.month === null || (result.credits === 0 && result.debits === 0)) {
-    el.innerHTML = `<div class="form-card"><div class="alert"><strong>Aucune transaction détectée.</strong> Ce PDF est peut-être un scan (image), un format non standard, ou protégé. Saisis les données manuellement ci-dessous.</div></div>`;
+function handleCsvDrop(e) {
+  e.preventDefault();
+  document.getElementById('csvZone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) handleCsvFile(file);
+}
+
+async function handleCsvFile(file) {
+  if (!file) return;
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && !name.endsWith('.txt')) {
+    toast('Sélectionne un fichier CSV ou TXT.', 'error');
+    return;
+  }
+  const el = document.getElementById('csvResult');
+  el.innerHTML = '<div class="form-card pdf-parsing">⏳ Analyse du relevé en cours...</div>';
+
+  try {
+    const text = await file.text();
+    const result = parseCSVStatement(text);
+    displayCsvResult(result, text);
+  } catch(err) {
+    console.error(err);
+    el.innerHTML = '<div class="form-card"><div class="alert"><strong>Erreur de lecture :</strong> Ce fichier n\'a pas pu être analysé. Vérifie qu\'il s\'agit d\'un CSV exporté depuis ton e-banking.</div></div>';
+  }
+  document.getElementById('csvInput').value = '';
+}
+
+function displayCsvResult(result, rawText) {
+  const el = document.getElementById('csvResult');
+
+  if (!result || result.month === null || (result.credits === 0 && result.debits === 0)) {
+    el.innerHTML = `
+    <div class="form-card">
+      <div class="alert"><strong>Aucune transaction détectée.</strong> Le format de ce fichier n'a pas été reconnu. Assure-toi d'exporter un CSV depuis ton e-banking (avec colonnes Date, Débit/Crédit ou Montant).</div>
+      ${rawText ? `<details style="margin-top:12px"><summary style="font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Mono',monospace">Voir le contenu brut (diagnostic)</summary><pre style="font-size:10px;color:var(--muted);background:var(--bg3);padding:12px;border-radius:6px;margin-top:8px;overflow:auto;max-height:220px;white-space:pre-wrap">${rawText.slice(0,2000)}</pre></details>` : ''}
+    </div>`;
     return;
   }
 
@@ -609,44 +632,41 @@ function displayPdfResult(result) {
     .map(r => `<tr><td>${r.label}</td><td class="td-mono" style="color:var(--red)">${r.val.toLocaleString('fr-CH')} CHF</td></tr>`)
     .join('');
 
-  const confidence = result.txCount > 8 ? 'Élevée' : result.txCount > 2 ? 'Partielle' : 'Limitée';
-  const confColor  = result.txCount > 8 ? 'var(--green)' : result.txCount > 2 ? 'var(--amber)' : 'var(--red)';
-
   el.innerHTML = `
   <div class="form-card" style="border-color:rgba(91,184,122,0.3);margin-bottom:20px">
     <div class="form-title" style="color:var(--green)">✓ Relevé analysé — ${MNF[result.month]} ${result.year}</div>
-    <div style="font-size:11px;color:${confColor};margin-bottom:16px;font-family:'DM Mono',monospace">
-      Fiabilité : ${confidence} · ${result.txCount} transaction(s) identifiée(s) — <em>vérifie les montants avant d'enregistrer</em>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;font-family:'DM Mono',monospace">
+      ${result.txCount} transaction(s) détectée(s) — <em>vérifie et corrige si nécessaire avant d'enregistrer</em>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:${catRows ? '16px' : '0'}">
       <div class="mc green"><div class="mc-tag">Crédits détectés</div><div class="mc-val green">${Math.round(result.credits).toLocaleString('fr-CH')} CHF</div></div>
       <div class="mc red"><div class="mc-tag">Débits détectés</div><div class="mc-val red">${Math.round(result.debits).toLocaleString('fr-CH')} CHF</div></div>
     </div>
     ${catRows ? `<div class="sec-title">Répartition détectée</div><div class="table-wrap" style="margin-bottom:16px"><table><tbody>${catRows}</tbody></table></div>` : ''}
-    <div class="btn-row">
-      <button class="btn primary" onclick="loadPdfResultIntoForm()">Charger dans le formulaire</button>
-      <button class="btn" onclick="document.getElementById('pdfResult').innerHTML=''">Ignorer</button>
+    <div class="btn-row" style="margin-bottom:12px">
+      <button class="btn primary" onclick="loadCsvResultIntoForm()">Charger dans le formulaire</button>
+      <button class="btn" onclick="document.getElementById('csvResult').innerHTML=''">Ignorer</button>
     </div>
   </div>`;
 
-  window._pdfResult = result;
+  window._csvResult = result;
 }
 
-function loadPdfResultIntoForm() {
-  const r = window._pdfResult;
+function loadCsvResultIntoForm() {
+  const r = window._csvResult;
   if (!r) return;
-  document.getElementById('fMonth').value           = r.month;
-  document.getElementById('fYear').value            = r.year;
-  document.getElementById('fCredits').value         = r.credits ? r.credits.toFixed(2) : '';
-  document.getElementById('fDebits').value          = r.debits  ? r.debits.toFixed(2)  : '';
-  document.getElementById('cFood').value            = r.cats.food      ? Math.round(r.cats.food)      : '';
-  document.getElementById('cFuel').value            = r.cats.fuel      ? Math.round(r.cats.fuel)      : '';
-  document.getElementById('cNight').value           = r.cats.night     ? Math.round(r.cats.night)     : '';
-  document.getElementById('cTravel').value          = r.cats.travel    ? Math.round(r.cats.travel)    : '';
-  document.getElementById('cShop').value            = r.cats.shop      ? Math.round(r.cats.shop)      : '';
-  document.getElementById('cTransport').value       = r.cats.transport ? Math.round(r.cats.transport) : '';
-  document.getElementById('cOther').value           = r.cats.other     ? Math.round(r.cats.other)     : '';
-  document.getElementById('pdfResult').innerHTML    = '';
+  document.getElementById('fMonth').value     = r.month;
+  document.getElementById('fYear').value      = r.year;
+  document.getElementById('fCredits').value   = r.credits ? r.credits.toFixed(2) : '';
+  document.getElementById('fDebits').value    = r.debits  ? r.debits.toFixed(2)  : '';
+  document.getElementById('cFood').value      = r.cats.food      ? Math.round(r.cats.food)      : '';
+  document.getElementById('cFuel').value      = r.cats.fuel      ? Math.round(r.cats.fuel)      : '';
+  document.getElementById('cNight').value     = r.cats.night     ? Math.round(r.cats.night)     : '';
+  document.getElementById('cTravel').value    = r.cats.travel    ? Math.round(r.cats.travel)    : '';
+  document.getElementById('cShop').value      = r.cats.shop      ? Math.round(r.cats.shop)      : '';
+  document.getElementById('cTransport').value = r.cats.transport ? Math.round(r.cats.transport) : '';
+  document.getElementById('cOther').value     = r.cats.other     ? Math.round(r.cats.other)     : '';
+  document.getElementById('csvResult').innerHTML = '';
   toast('Données chargées — vérifie et enregistre le mois.');
   document.getElementById('tab-import').querySelector('.form-card').scrollIntoView({ behavior: 'smooth' });
 }
