@@ -34,6 +34,7 @@ Analyse automatique basée sur les données saisies.
 - **Conseils** — analyse automatique des données : équilibre budgétaire, alertes sur les postes de dépenses élevés, progression du remboursement
 - **Export PDF** — impression de la vue courante directement depuis le navigateur
 - **Export e-mail** — génération d'un résumé textuel envoyé via le client mail par défaut
+- **Export / Import JSON** — sauvegarde et restauration complète des données pour synchroniser entre appareils
 
 ## Utilisation
 
@@ -65,6 +66,25 @@ Chart.js 4.4.1 est chargé depuis un CDN (`cdnjs.cloudflare.com`). Une connexion
 ```
 
 Les numéros de mois suivent la convention JavaScript (0 = janvier, 11 = décembre).
+
+## Synchroniser entre appareils (PC ↔ iPhone)
+
+Les données étant stockées localement dans le navigateur, la synchronisation se fait manuellement via les boutons **⬇ JSON** et **⬆ JSON** présents dans l'en-tête.
+
+### PC → iPhone
+
+1. Sur le PC, ouvre l'app et clique sur **⬇ JSON** — un fichier `budget-tracker-YYYY-MM-DD.json` est téléchargé.
+2. Transfère ce fichier sur ton iPhone (AirDrop, iCloud Drive, e-mail, ou tout autre moyen).
+3. Sur iPhone, ouvre l'app dans Safari et clique sur **⬆ JSON**.
+4. Sélectionne le fichier reçu — les données sont chargées immédiatement.
+
+### iPhone → PC
+
+Même procédure dans l'autre sens : **⬇ JSON** sur iPhone → transfert → **⬆ JSON** sur PC.
+
+> **Conseil :** exporte toujours depuis l'appareil le plus à jour avant d'importer sur l'autre, pour ne pas écraser des données plus récentes.
+
+---
 
 ## Réinitialiser les données
 

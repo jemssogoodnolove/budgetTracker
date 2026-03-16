@@ -154,6 +154,26 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 
 footer{text-align:center;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted2);margin-top:60px;letter-spacing:.06em}
 
+/* MOBILE PORTRAIT */
+@media(max-width:480px){
+  .page{padding:20px 12px 60px}
+  .header{margin-bottom:20px}
+  .header-top{flex-direction:column;gap:10px}
+  .export-actions{flex-wrap:wrap;gap:6px}
+  h1{font-size:20px}
+  .nav{overflow-x:auto;-webkit-overflow-scrolling:touch;gap:0;padding-bottom:0}
+  .nav-tab{padding:10px 13px;font-size:12px;white-space:nowrap;flex-shrink:0}
+  .metric-grid{grid-template-columns:1fr 1fr}
+  .mc{padding:12px 14px}
+  .mc-val{font-size:18px}
+  .form-grid{grid-template-columns:1fr}
+  .sim-result-grid{grid-template-columns:1fr 1fr}
+  .chart-card{padding:14px}
+  .repay-row{flex-wrap:wrap;gap:6px}
+  .sec-title{font-size:9px}
+  td,th{padding:7px 8px;font-size:11px}
+}
+
 /* PDF IMPORT ZONE */
 .pdf-zone{border:0.5px dashed var(--border3);border-radius:12px;padding:32px 24px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:20px;background:var(--bg2)}
 .pdf-zone:hover,.pdf-zone.drag{border-color:var(--amber);background:var(--amber-bg)}
