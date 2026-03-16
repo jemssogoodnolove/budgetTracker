@@ -2,6 +2,30 @@
 
 Un tableau de bord de finances personnelles pour suivre les revenus et dépenses mensuels, visualiser les postes de dépenses par catégorie et gérer le remboursement d'une dette — le tout stocké localement dans le navigateur.
 
+## Aperçu
+
+### Dashboard
+Vue d'ensemble avec les indicateurs clés et les graphiques mensuels.
+
+![Dashboard](docs/screenshots/01-dashboard.png)
+
+### Importer un mois
+Formulaire de saisie des crédits/débits avec détail optionnel par catégorie.
+
+![Import](docs/screenshots/02-import.png)
+
+### Dette & remboursement
+Suivi de la progression, historique des versements et simulateur d'échéance.
+
+![Dette](docs/screenshots/03-dette.png)
+
+### Conseils
+Analyse automatique basée sur les données saisies.
+
+![Conseils](docs/screenshots/04-insights.png)
+
+---
+
 ## Fonctionnalités
 
 - **Dashboard** — graphique revenus vs dépenses, répartition des dépenses par catégorie (donut + barres), indicateurs clés (revenu moyen, dépenses moyennes, solde mensuel, dette restante)
@@ -20,9 +44,10 @@ Les données sont sauvegardées dans le `localStorage` du navigateur (clé `budg
 ## Structure du projet
 
 ```
-index.html   — Structure HTML
-style.css    — Styles (thème sombre, variables CSS, responsive)
-app.js       — Logique applicative (état, rendu, intégration Chart.js, exports)
+index.html            — Structure HTML
+style.css             — Styles (thème sombre, variables CSS, responsive)
+app.js                — Logique applicative (état, rendu, intégration Chart.js, exports)
+docs/screenshots/     — Captures d'écran de l'interface
 ```
 
 Chart.js 4.4.1 est chargé depuis un CDN (`cdnjs.cloudflare.com`).
