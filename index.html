@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div class="header-top">
+      <div>
+        <div class="header-label">Budget Tracker</div>
+        <h1>Budget <span>Tracker</span></h1>
+        <div class="header-sub" id="headerSub">Aucune donnée — commence par importer un mois.</div>
+      </div>
+      <div class="export-actions">
+        <button class="btn sm" onclick="exportEmail()" title="Envoyer le résumé par e-mail">✉ E-mail</button>
+        <button class="btn sm" onclick="exportPDF()" title="Exporter en PDF">⬇ PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav">
+    <button class="nav-tab active" onclick="goTab('dashboard')">Dashboard</button>
+    <button class="nav-tab" onclick="goTab('import')">Importer un mois</button>
+    <button class="nav-tab" onclick="goTab('dette')">Dette & remboursement</button>
+    <button class="nav-tab" onclick="goTab('insights')">Conseils</button>
+  </div>
+
+  <!-- ===== DASHBOARD ===== -->
+  <div class="tab-section active" id="tab-dashboard">
+    <div id="noDataMsg" class="empty">
+      <div class="empty-icon">📊</div>
+      <div class="empty-text">Aucune donnée — commence par importer un relevé dans <strong>Importer un mois</strong>.</div>
+    </div>
+    <div id="dashContent" style="display:none">
+      <div class="metric-grid" id="dashMetrics"></div>
+      <div class="sec-title">Revenus vs dépenses</div>
+      <div class="chart-row">
+        <div class="chart-card full">
+          <div class="chart-title">Évolution mensuelle (CHF)</div>
+          <div class="chart-wrap" style="height:200px"><canvas id="cBar"></canvas></div>
+        </div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <div class="chart-title">Répartition des dépenses (tous mois)</div>
+          <div class="chart-wrap" style="height:220px"><canvas id="cDonut"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">Détail par catégorie</div>
+          <div class="cat-list" id="catList"></div>
+        </div>
+      </div>
+      <div class="sec-title">Historique des mois</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mois</th><th>Revenus</th><th>Dépenses</th><th>Solde</th><th></th></tr></thead>
+          <tbody id="monthTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== IMPORT ===== -->
+  <div class="tab-section" id="tab-import">
+    <div class="info-box">
+      <strong>Comment ça marche :</strong> Chaque mois, saisis les chiffres de ton relevé bancaire manuellement. Les données sont sauvegardées dans ton navigateur et les graphiques se mettent à jour automatiquement.
+    </div>
+
+    <div class="form-card">
+      <div class="form-title">Ajouter / modifier un mois</div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Mois</label>
+          <select id="fMonth">
+            <option value="0">Janvier</option><option value="1">Février</option>
+            <option value="2">Mars</option><option value="3">Avril</option>
+            <option value="4">Mai</option><option value="5">Juin</option>
+            <option value="6">Juillet</option><option value="7">Août</option>
+            <option value="8">Septembre</option><option value="9">Octobre</option>
+            <option value="10">Novembre</option><option value="11">Décembre</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Année</label>
+          <input type="number" id="fYear" min="2020" max="2040">
+        </div>
+        <div class="field">
+          <label>Total crédits (CHF)</label>
+          <input type="number" id="fCredits" placeholder="ex. 3500" step="0.01">
+        </div>
+        <div class="field">
+          <label>Total débits (CHF)</label>
+          <input type="number" id="fDebits" placeholder="ex. 2800" step="0.01">
+        </div>
+      </div>
+      <div class="sec-title" style="margin-top:4px">Détail des catégories (facultatif — estimation ok)</div>
+      <div class="form-grid">
+        <div class="field"><label>Alimentation & restos (CHF)</label><input type="number" id="cFood" placeholder="0"></div>
+        <div class="field"><label>Carburant & station (CHF)</label><input type="number" id="cFuel" placeholder="0"></div>
+        <div class="field"><label>Sorties & divertissement (CHF)</label><input type="number" id="cNight" placeholder="0"></div>
+        <div class="field"><label>Voyages (CHF)</label><input type="number" id="cTravel" placeholder="0"></div>
+        <div class="field"><label>Supermarchés (CHF)</label><input type="number" id="cShop" placeholder="0"></div>
+        <div class="field"><label>Transports (CHF)</label><input type="number" id="cTransport" placeholder="0"></div>
+        <div class="field"><label>Divers (CHF)</label><input type="number" id="cOther" placeholder="0"></div>
+      </div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn primary" onclick="saveMonth()">Enregistrer ce mois</button>
+        <button class="btn" onclick="clearImportForm()">Effacer</button>
+      </div>
+    </div>
+
+    <div class="sec-title">Mois déjà enregistrés</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Mois</th><th>Crédits</th><th>Débits</th><th>Solde</th><th></th></tr></thead>
+        <tbody id="importedMonths"></tbody>
+      </table>
+    </div>
+    <div id="importedEmpty" class="empty">
+      <div class="empty-icon">📅</div>
+      <div class="empty-text">Aucun mois enregistré.</div>
+    </div>
+  </div>
+
+  <!-- ===== DETTE ===== -->
+  <div class="tab-section" id="tab-dette">
+    <div class="sec-title">Progression du remboursement</div>
+    <div id="detteProgress"></div>
+
+    <div class="chart-row" style="margin-bottom:24px">
+      <div class="chart-card full">
+        <div class="chart-title">Historique des remboursements</div>
+        <div class="chart-wrap" style="height:160px"><canvas id="cRepay"></canvas></div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-title">Enregistrer un remboursement</div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Date</label>
+          <input type="date" id="rDate">
+        </div>
+        <div class="field">
+          <label>Montant remboursé (CHF)</label>
+          <input type="number" id="rAmount" placeholder="ex. 500" step="0.01" min="1">
+        </div>
+        <div class="field">
+          <label>Note (facultatif)</label>
+          <input type="text" id="rNote" placeholder="ex. Virement mensuel">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="saveRepayment()">Enregistrer</button>
+      </div>
+    </div>
+
+    <div class="sec-title">Historique des versements</div>
+    <div id="repayList"></div>
+
+    <div class="sec-title" style="margin-top:28px">Simulateur</div>
+    <div class="form-card">
+      <div class="slider-wrap">
+        <span class="slider-label">Mensualité souhaitée</span>
+        <input type="range" id="simSlider" min="100" max="800" step="50" value="300" oninput="updateSim(+this.value)">
+        <span class="slider-val" id="simVal">300 CHF / mois</span>
+      </div>
+      <div class="sim-result-grid">
+        <div class="sim-stat"><div class="sim-stat-val" id="sDuree">—</div><div class="sim-stat-label">Mois restants</div></div>
+        <div class="sim-stat"><div class="sim-stat-val" id="sDate">—</div><div class="sim-stat-label">Soldé en</div></div>
+        <div class="sim-stat"><div class="sim-stat-val" id="sEcon">—</div><div class="sim-stat-label">À dégager / mois</div></div>
+      </div>
+      <div class="chart-wrap" style="height:160px"><canvas id="cSim"></canvas></div>
+    </div>
+
+    <div class="sec-title" style="margin-top:28px">Paramètres de la dette</div>
+    <div class="form-card">
+      <div class="form-grid">
+        <div class="field">
+          <label>Montant initial (CHF)</label>
+          <input type="number" id="debtTotal" placeholder="ex. 10000" step="0.01">
+        </div>
+        <div class="field">
+          <label>Taux d'intérêt annuel (%)</label>
+          <input type="number" id="debtRate" placeholder="0" step="0.01" min="0">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="saveDebtParams()">Mettre à jour</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== INSIGHTS ===== -->
+  <div class="tab-section" id="tab-insights">
+    <div id="insightsContent"></div>
+  </div>
+
+  <footer>DONNÉES LOCALES · NAVIGATEUR · USAGE PERSONNEL</footer>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
