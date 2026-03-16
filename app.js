@@ -737,6 +737,45 @@ function exportEmail() {
 }
 
 // ============================================================
+// EXPORT / IMPORT JSON
+// ============================================================
+function exportData() {
+  const json = localStorage.getItem(STORAGE_KEY) || '{}';
+  const blob = new Blob([json], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `budget-tracker-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData() {
+  const input = document.createElement('input');
+  input.type  = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!parsed.months) throw new Error('Format invalide');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        load();
+        renderDashboard();
+        toast('Données importées avec succès.', 'success');
+      } catch {
+        toast('Fichier invalide — vérifie qu\'il s\'agit d\'un export Budget Tracker.', 'error');
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// ============================================================
 // UTILS
 // ============================================================
 function fmt(n) { return Math.round(n).toLocaleString('fr-CH'); }
