@@ -530,9 +530,12 @@ function parseCSVStatement(text) {
   const headers  = rows[headerIdx];
   const colDate  = findColIdx(headers, ['date','datum','dat']);
   const colDesc  = findColIdx(headers, ['libellé','libelle','description','texte','text','buchungstext','bezeichnung','remarque']);
-  const colAmt   = findColIdx(headers, ['montant','amount','betrag']);
   const colDebit = findColIdx(headers, ['débit','debit','belastung','ausgabe']);
   const colCredit= findColIdx(headers, ['crédit','credit','gutschrift','einnahme']);
+  // Use a single amount column only when no separate debit/credit columns exist
+  const colAmt   = (colDebit !== -1 || colCredit !== -1)
+                   ? -1
+                   : findColIdx(headers, ['montant','amount','betrag']);
 
   if (colDate === -1 || (colAmt === -1 && colDebit === -1 && colCredit === -1)) return null;
 
