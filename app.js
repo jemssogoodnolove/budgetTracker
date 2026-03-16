@@ -453,6 +453,205 @@ function renderInsights() {
 }
 
 // ============================================================
+// PDF IMPORT — PARSING
+// ============================================================
+const PDF_CAT_KEYWORDS = {
+  food:      ['justeat','ubereats','uber eat','deliveroo','mcdonald','mcdo ','kfc ','subway ','popeyes','burger','pizza ','sushi','restaurant','resto ','boulang','patisseri','kebab','traiteur','cafeteria','cantine','sandwi','takeaway','brasserie','pizzeria','eat.ch','snack'],
+  fuel:      ['tamoil','celsa','eni ','shell ','bp ','migrol','agrola','socar','repsol','station ','benzin','carburant'],
+  night:     ['nightclub','club ','pub ','bar ','disco ','lounge','concert','festival','ticketcorner','cinema ','kino ','theatre','spectacle'],
+  travel:    ['sbb.ch','cff ','sncf ','easyjet','ryanair','swiss air','swissair','edelweiss','booking.com','airbnb','hotel ','hostel','auberge','expedia','lastminute','aeroport','airport','eurostar','flixbus'],
+  shop:      ['migros ','coop ','denner ','aldi ','lidl ','manor ','globus ','ikea','galaxus','digitec','zalando','amazon','h&m ','zara ','interdiscount','jumbo '],
+  transport: ['tpg ','bls ','vbz ','postauto','postbus','unireso','parking','parkhaus','uber ','taxi ','sixt ','europcar','apcoa'],
+};
+
+function pdfGetCategory(desc) {
+  const d = desc.toLowerCase();
+  for (const [cat, kws] of Object.entries(PDF_CAT_KEYWORDS)) {
+    if (kws.some(kw => d.includes(kw))) return cat;
+  }
+  return 'other';
+}
+
+function pdfExtractAmounts(text) {
+  const results = [];
+  const re = /(?<!\d)(\d{1,3}(?:['\u202f ]\d{3})*[.,]\d{2})(?!\d)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const val = parseFloat(m[1].replace(/['\u202f ]/g, '').replace(',', '.'));
+    if (val >= 0.5 && val < 1000000) results.push(val);
+  }
+  return results;
+}
+
+function handlePdfDrop(e) {
+  e.preventDefault();
+  document.getElementById('pdfZone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) handlePdfFile(file);
+}
+
+async function handlePdfFile(file) {
+  if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
+    toast('Sélectionne un fichier PDF.', 'error');
+    return;
+  }
+  const el = document.getElementById('pdfResult');
+  el.innerHTML = '<div class="form-card pdf-parsing">⏳ Analyse du relevé en cours...</div>';
+
+  if (!window.pdfjsLib) {
+    el.innerHTML = '<div class="form-card"><div class="alert"><strong>PDF.js non chargé.</strong> Vérifie ta connexion internet et réessaie.</div></div>';
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  try {
+    const result = await parseBankPDF(file);
+    displayPdfResult(result);
+  } catch(err) {
+    console.error(err);
+    el.innerHTML = '<div class="form-card"><div class="alert"><strong>Erreur de lecture :</strong> Ce PDF n\'a pas pu être analysé. Il est peut-être scanné (image sans texte). Saisis les données manuellement.</div></div>';
+  }
+  document.getElementById('pdfInput').value = '';
+}
+
+async function parseBankPDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const allLines = [];
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+
+    // Group text items by Y position (2px tolerance) to reconstruct lines
+    const byY = {};
+    content.items.forEach(item => {
+      if (!item.str.trim()) return;
+      const y = Math.round(item.transform[5] / 2) * 2;
+      if (!byY[y]) byY[y] = [];
+      byY[y].push({ text: item.str, x: item.transform[4] });
+    });
+
+    Object.keys(byY)
+      .sort((a, b) => +b - +a) // top to bottom
+      .forEach(y => {
+        const line = byY[y].sort((a, b) => a.x - b.x).map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
+        if (line.length > 1) allLines.push(line);
+      });
+  }
+
+  return parseStatementLines(allLines);
+}
+
+function parseStatementLines(lines) {
+  const dateRe = /\b(\d{2})[./](\d{2})[./](\d{4})\b/;
+  let credits = 0, debits = 0;
+  const cats = { food: 0, fuel: 0, night: 0, travel: 0, shop: 0, transport: 0, other: 0 };
+  let detectedMonth = null, detectedYear = null;
+  let txCount = 0;
+
+  // Pass 1 — look for explicit totals (most reliable)
+  let foundTotalDebits = 0, foundTotalCredits = 0;
+  lines.forEach(line => {
+    const amounts = pdfExtractAmounts(line);
+    if (!amounts.length) return;
+    const amt = amounts[amounts.length - 1];
+    if (/(total.{0,15}d[eé]bit|sortie.{0,5}total|gesamtbelast)/i.test(line))  foundTotalDebits  = amt;
+    if (/(total.{0,15}cr[eé]dit|entr[eé]e.{0,5}total|gesamtgutsschr)/i.test(line)) foundTotalCredits = amt;
+  });
+
+  // Pass 2 — parse individual transaction lines for categories
+  lines.forEach(line => {
+    const dateMatch = line.match(dateRe);
+    if (!dateMatch) return;
+    const day = +dateMatch[1], month = +dateMatch[2] - 1, year = +dateMatch[3];
+    if (day < 1 || day > 31 || month < 0 || month > 11 || year < 2020 || year > 2040) return;
+
+    if (detectedMonth === null) { detectedMonth = month; detectedYear = year; }
+
+    const amounts = pdfExtractAmounts(line);
+    if (!amounts.length) return;
+    // In most statements the last amount is the balance — use second-to-last if available
+    const amount = amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[amounts.length - 1];
+    if (amount < 0.01) return;
+
+    const isCredit = /salaire|salary|virement.{0,10}entrant|bonification|avoir|gutschrift|intérêt/i.test(line);
+    if (isCredit) {
+      credits += amount;
+    } else {
+      debits += amount;
+      cats[pdfGetCategory(line)] += amount;
+    }
+    txCount++;
+  });
+
+  // Prefer found totals when they diverge significantly from parsed sums
+  if (foundTotalDebits  > 0 && (debits  === 0 || Math.abs(foundTotalDebits  - debits)  / foundTotalDebits  > 0.1)) debits  = foundTotalDebits;
+  if (foundTotalCredits > 0 && (credits === 0 || Math.abs(foundTotalCredits - credits) / foundTotalCredits > 0.1)) credits = foundTotalCredits;
+
+  // If totals were found but no transactions parsed, dump debits into 'other'
+  if (txCount === 0 && debits > 0) cats.other = debits;
+
+  return { month: detectedMonth, year: detectedYear, credits, debits, cats, txCount };
+}
+
+function displayPdfResult(result) {
+  const el = document.getElementById('pdfResult');
+  if (result.month === null || (result.credits === 0 && result.debits === 0)) {
+    el.innerHTML = `<div class="form-card"><div class="alert"><strong>Aucune transaction détectée.</strong> Ce PDF est peut-être un scan (image), un format non standard, ou protégé. Saisis les données manuellement ci-dessous.</div></div>`;
+    return;
+  }
+
+  const CAT_KEYS = ['food','fuel','night','travel','shop','transport','other'];
+  const catRows = CAT_KEYS
+    .map((k, i) => ({ label: CAT_LABELS[i], val: Math.round(result.cats[k] || 0) }))
+    .filter(r => r.val > 0).sort((a, b) => b.val - a.val)
+    .map(r => `<tr><td>${r.label}</td><td class="td-mono" style="color:var(--red)">${r.val.toLocaleString('fr-CH')} CHF</td></tr>`)
+    .join('');
+
+  const confidence = result.txCount > 8 ? 'Élevée' : result.txCount > 2 ? 'Partielle' : 'Limitée';
+  const confColor  = result.txCount > 8 ? 'var(--green)' : result.txCount > 2 ? 'var(--amber)' : 'var(--red)';
+
+  el.innerHTML = `
+  <div class="form-card" style="border-color:rgba(91,184,122,0.3);margin-bottom:20px">
+    <div class="form-title" style="color:var(--green)">✓ Relevé analysé — ${MNF[result.month]} ${result.year}</div>
+    <div style="font-size:11px;color:${confColor};margin-bottom:16px;font-family:'DM Mono',monospace">
+      Fiabilité : ${confidence} · ${result.txCount} transaction(s) identifiée(s) — <em>vérifie les montants avant d'enregistrer</em>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:${catRows ? '16px' : '0'}">
+      <div class="mc green"><div class="mc-tag">Crédits détectés</div><div class="mc-val green">${Math.round(result.credits).toLocaleString('fr-CH')} CHF</div></div>
+      <div class="mc red"><div class="mc-tag">Débits détectés</div><div class="mc-val red">${Math.round(result.debits).toLocaleString('fr-CH')} CHF</div></div>
+    </div>
+    ${catRows ? `<div class="sec-title">Répartition détectée</div><div class="table-wrap" style="margin-bottom:16px"><table><tbody>${catRows}</tbody></table></div>` : ''}
+    <div class="btn-row">
+      <button class="btn primary" onclick="loadPdfResultIntoForm()">Charger dans le formulaire</button>
+      <button class="btn" onclick="document.getElementById('pdfResult').innerHTML=''">Ignorer</button>
+    </div>
+  </div>`;
+
+  window._pdfResult = result;
+}
+
+function loadPdfResultIntoForm() {
+  const r = window._pdfResult;
+  if (!r) return;
+  document.getElementById('fMonth').value           = r.month;
+  document.getElementById('fYear').value            = r.year;
+  document.getElementById('fCredits').value         = r.credits ? r.credits.toFixed(2) : '';
+  document.getElementById('fDebits').value          = r.debits  ? r.debits.toFixed(2)  : '';
+  document.getElementById('cFood').value            = r.cats.food      ? Math.round(r.cats.food)      : '';
+  document.getElementById('cFuel').value            = r.cats.fuel      ? Math.round(r.cats.fuel)      : '';
+  document.getElementById('cNight').value           = r.cats.night     ? Math.round(r.cats.night)     : '';
+  document.getElementById('cTravel').value          = r.cats.travel    ? Math.round(r.cats.travel)    : '';
+  document.getElementById('cShop').value            = r.cats.shop      ? Math.round(r.cats.shop)      : '';
+  document.getElementById('cTransport').value       = r.cats.transport ? Math.round(r.cats.transport) : '';
+  document.getElementById('cOther').value           = r.cats.other     ? Math.round(r.cats.other)     : '';
+  document.getElementById('pdfResult').innerHTML    = '';
+  toast('Données chargées — vérifie et enregistre le mois.');
+  document.getElementById('tab-import').querySelector('.form-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ============================================================
 // EXPORT — PDF
 // ============================================================
 function exportPDF() {
