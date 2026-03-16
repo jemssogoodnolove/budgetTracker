@@ -29,7 +29,7 @@ Analyse automatique basée sur les données saisies.
 ## Fonctionnalités
 
 - **Dashboard** — graphique revenus vs dépenses, répartition des dépenses par catégorie (donut + barres), indicateurs clés (revenu moyen, dépenses moyennes, solde mensuel, dette restante)
-- **Importer un mois** — saisie manuelle des crédits et débits de chaque mois, avec détail optionnel par catégorie (alimentation, carburant, sorties, voyages, supermarchés, transports, divers)
+- **Importer un mois** — import automatique depuis un relevé bancaire PDF (extraction du texte, détection des montants et catégorisation par mots-clés) ou saisie manuelle avec détail optionnel par catégorie
 - **Dette & remboursement** — enregistrement des versements, suivi de la progression par rapport à un montant configurable, simulation de l'échéance avec un curseur interactif
 - **Conseils** — analyse automatique des données : équilibre budgétaire, alertes sur les postes de dépenses élevés, progression du remboursement
 - **Export PDF** — impression de la vue courante directement depuis le navigateur
@@ -50,7 +50,9 @@ app.js                — Logique applicative (état, rendu, intégration Chart.
 docs/screenshots/     — Captures d'écran de l'interface
 ```
 
-Chart.js 4.4.1 est chargé depuis un CDN (`cdnjs.cloudflare.com`).
+Chart.js 4.4.1 et PDF.js 3.11.174 sont chargés depuis un CDN (`cdnjs.cloudflare.com`). Une connexion internet est donc nécessaire au premier chargement.
+
+> **Limite du parsing PDF :** fonctionne uniquement sur les PDFs avec une couche texte native (relevés générés numériquement). Les PDFs scannés (image) ne sont pas supportés.
 
 ## Modèle de données
 
